@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -12,6 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from '../theme/colors';
+import { ProviderServicesModal } from '../components/ProviderServicesModal';
+import { sharedStore, OfferedService, Technician } from '../../../customer/src/data/sharedData';
 
 interface Props {
   user: any;
@@ -20,18 +22,58 @@ interface Props {
 
 export function HomeScreen({ user, onNavigateToJob }: Props) {
   const insets = useSafeAreaInsets();
+  const proId = user?.id || 'PRO-101';
   const [isOnline, setIsOnline] = useState(true);
   const [showIncomingJob, setShowIncomingJob] = useState(true);
   const [countdown, setCountdown] = useState(25);
+  const [servicesModalVisible, setServicesModalVisible] = useState(false);
+  const [currentTech, setCurrentTech] = useState<Technician | undefined>(undefined);
+
+  useEffect(() => {
+    const syncTech = () => {
+      const techs = sharedStore.getTechnicians();
+      const found = techs.find((t) => t.id === proId || t.phone === user?.phone);
+      if (found) {
+        setCurrentTech(found);
+        setIsOnline(found.isOnline);
+      } else {
+        // Fallback first technician
+        setCurrentTech(techs[0]);
+        setIsOnline(techs[0]?.isOnline ?? true);
+      }
+    };
+    syncTech();
+    const unsub = sharedStore.subscribe(syncTech);
+    return () => unsub();
+  }, [proId, user]);
 
   const toggleOnline = () => {
-    setIsOnline((prev) => !prev);
+    const nextState = !isOnline;
+    setIsOnline(nextState);
+    if (currentTech) {
+      sharedStore.toggleTechnicianStatus(currentTech.id);
+    }
     Alert.alert(
-      !isOnline ? 'You are ONLINE' : 'You are OFFLINE',
-      !isOnline
-        ? 'You will now receive new job requests nearby.'
-        : 'You will not receive new requests while offline.'
+      nextState ? 'You are ONLINE 🟢' : 'You are OFFLINE 🔴',
+      nextState
+        ? 'Your services & custom rates are now visible to nearby customers (<10 km).'
+        : 'You will not receive new customer requests while offline.'
     );
+  };
+
+  const handleDeleteService = (serviceId: string, title: string) => {
+    Alert.alert('Delete Service', `Are you sure you want to delete "${title}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          if (currentTech) {
+            sharedStore.deleteProviderService(currentTech.id, serviceId);
+          }
+        },
+      },
+    ]);
   };
 
   const handleAcceptJob = () => {
@@ -46,6 +88,8 @@ export function HomeScreen({ user, onNavigateToJob }: Props) {
     Alert.alert('Job Rejected', 'Request passed to another nearby technician.');
   };
 
+  const offeredServicesList: OfferedService[] = currentTech?.offeredServices || [];
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -53,8 +97,8 @@ export function HomeScreen({ user, onNavigateToJob }: Props) {
         <View style={styles.header}>
           <View>
             <Text style={styles.welcomeText}>Welcome back 👋</Text>
-            <Text style={styles.proName}>{user?.name || 'Ramesh Kumar'}</Text>
-            <Text style={styles.proSkill}>{user?.category || 'AC Repair Specialist'}</Text>
+            <Text style={styles.proName}>{currentTech?.name || user?.name || 'Sunita Sharma'}</Text>
+            <Text style={styles.proSkill}>{currentTech?.category || 'Beauty & Parlour Specialist'}</Text>
           </View>
           {/* Online Toggle */}
           <View style={[styles.statusToggle, isOnline && styles.statusToggleOnline]}>
@@ -86,18 +130,78 @@ export function HomeScreen({ user, onNavigateToJob }: Props) {
           <View style={styles.heroStats}>
             <View style={styles.statCol}>
               <Text style={styles.statLabel}>Completed</Text>
-              <Text style={styles.statVal}>3 Jobs</Text>
+              <Text style={styles.statVal}>{currentTech?.completedJobs || 184} Jobs</Text>
             </View>
             <View style={styles.statCol}>
-              <Text style={styles.statLabel}>Avg Payout</Text>
-              <Text style={styles.statVal}>₹1,150/job</Text>
+              <Text style={styles.statLabel}>Avg Rating</Text>
+              <Text style={styles.statVal}>{currentTech?.rating || 4.9} ⭐</Text>
             </View>
             <View style={styles.statCol}>
-              <Text style={styles.statLabel}>Rating</Text>
-              <Text style={styles.statVal}>4.9 ⭐</Text>
+              <Text style={styles.statLabel}>Status</Text>
+              <Text style={[styles.statVal, { color: isOnline ? colors.success : colors.warning }]}>
+                {isOnline ? 'ONLINE' : 'OFFLINE'}
+              </Text>
             </View>
           </View>
         </View>
+
+        {/* Provider Custom Services & Rates Section */}
+        <View style={styles.servicesSectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>MY OFFERED SERVICES & RATES</Text>
+            <Text style={styles.sectionSub}>Custom rates set by you for customer panel</Text>
+          </View>
+          <Pressable style={styles.addServiceBtn} onPress={() => setServicesModalVisible(true)}>
+            <Ionicons name="add" size={16} color={colors.white} />
+            <Text style={styles.addServiceBtnText}>+ Set Rates</Text>
+          </Pressable>
+        </View>
+
+        {offeredServicesList.length > 0 ? (
+          <View style={styles.servicesList}>
+            {offeredServicesList.map((srv) => (
+              <View key={srv.serviceId} style={styles.serviceItemCard}>
+                <View style={styles.serviceItemMain}>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.subCatTag}>
+                      <Text style={styles.subCatTagText}>{srv.subcategoryName || 'Service'}</Text>
+                    </View>
+                    <Text style={styles.serviceItemTitle}>{srv.title}</Text>
+                    <View style={styles.reqRow}>
+                      <Ionicons name="document-text-outline" size={14} color={colors.purpleBright} />
+                      <Text style={styles.reqText} numberOfLines={2}>
+                        Req: {srv.requirements}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.servicePriceBox}>
+                    <Text style={styles.servicePriceValue}>₹{srv.price}</Text>
+                    <Text style={styles.serviceDuration}>{srv.duration}</Text>
+                    <Pressable
+                      style={styles.deleteIconBtn}
+                      onPress={() => handleDeleteService(srv.serviceId, srv.title)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyServicesCard}>
+            <Ionicons name="options-outline" size={32} color={colors.purpleBright} />
+            <Text style={styles.emptyTitle}>No Services Listed Yet</Text>
+            <Text style={styles.emptySub}>
+              Set your custom rates & requirements for Manicure, Pedicure, Facial, etc., to show up in customer panel.
+            </Text>
+            <Pressable style={styles.addServiceBtnLarge} onPress={() => setServicesModalVisible(true)}>
+              <Ionicons name="sparkles" size={16} color={colors.white} />
+              <Text style={styles.addServiceBtnLargeText}>Add Service & Set Rates Now</Text>
+            </Pressable>
+          </View>
+        )}
+
 
         {/* Incoming Job Notification Alert (Simulated Real-time push) */}
         {showIncomingJob && isOnline && (
@@ -198,11 +302,146 @@ export function HomeScreen({ user, onNavigateToJob }: Props) {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      <ProviderServicesModal
+        visible={servicesModalVisible}
+        proId={proId}
+        onClose={() => setServicesModalVisible(false)}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  servicesSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    marginTop: spacing.sm,
+  },
+  sectionSub: {
+    color: colors.textMuted,
+    fontSize: 11,
+    marginTop: 1,
+  },
+  addServiceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.purple,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+  },
+  addServiceBtnText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  servicesList: {
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  serviceItemCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1.5,
+    borderColor: colors.purple,
+  },
+  serviceItemMain: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  subCatTag: {
+    backgroundColor: colors.purpleSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+  },
+  subCatTagText: {
+    color: colors.purpleBright,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  serviceItemTitle: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  reqRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+    marginTop: 2,
+  },
+  reqText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    flex: 1,
+    lineHeight: 15,
+  },
+  servicePriceBox: {
+    alignItems: 'flex-end',
+  },
+  servicePriceValue: {
+    color: colors.white,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  serviceDuration: {
+    color: colors.textMuted,
+    fontSize: 10,
+    marginTop: 2,
+  },
+  deleteIconBtn: {
+    marginTop: 8,
+    padding: 4,
+  },
+  emptyServicesCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xl,
+  },
+  emptyTitle: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: spacing.sm,
+  },
+  emptySub: {
+    color: colors.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: spacing.lg,
+    lineHeight: 16,
+  },
+  addServiceBtnLarge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.purple,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: radius.full,
+  },
+  addServiceBtnLargeText: {
+    color: colors.white,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+
   root: {
     flex: 1,
     backgroundColor: colors.bg,
