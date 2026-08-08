@@ -47,7 +47,7 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
   const bottomPad = Math.max(insets.bottom, 12);
 
   return (
-    <View style={[styles.tabWrap, { paddingBottom: bottomPad }]} pointerEvents="box-none">
+    <View style={[styles.tabWrap, { paddingBottom: bottomPad, pointerEvents: 'box-none' }]}>
       <View style={styles.tabBar}>
         {state.routes.map((route: any, index: number) => {
           const isFocused = state.index === index;
@@ -145,15 +145,8 @@ const styles = StyleSheet.create({
     maxWidth: 380,
     borderWidth: 1.5,
     borderColor: '#252525',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOpacity: 0.7,
-        shadowRadius: 28,
-        shadowOffset: { width: 0, height: 12 },
-      },
-      android: { elevation: 28 },
-    }),
+    boxShadow: '0px 12px 28px rgba(0, 0, 0, 0.7)',
+    elevation: 28,
   },
   tabItem: {
     padding: 4,
